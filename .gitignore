@@ -1,0 +1,23 @@
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Python (falls Hilfsskripte dazukommen)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Editor-/Backup-Dateien
+*~
+*.bak
+*.swp
+*.tmp
