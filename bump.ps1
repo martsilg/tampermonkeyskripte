@@ -6,23 +6,36 @@
   Commit-Message. Default: "update".
 
 .PARAMETER File
-  Skriptdatei, deren @version gepatcht wird. Default: "Mobile Ticket-Detailansicht.user.js".
+  Skriptdatei, deren @version gepatcht wird. Bei mehreren .user.js-Dateien im
+  Ordner ist dieser Parameter Pflicht (kein automatischer Default mehr, um
+  nicht versehentlich das falsche Skript zu bumpen).
 
 .EXAMPLE
-  ./bump.ps1
-  ./bump.ps1 "Swipe-Geste verfeinert"
+  ./bump.ps1 "Swipe-Geste verfeinert" -File "Mobile Ticket-Detailansicht.user.js"
+  ./bump.ps1 -File "Mobile Kartenansicht Auftragsuebersicht.user.js"
 #>
 param(
     [Parameter(Position = 0)]
     [string]$Message = "update",
 
-    [string]$File = "Mobile Ticket-Detailansicht.user.js"
+    [string]$File
 )
 
 $ErrorActionPreference = "Stop"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $scriptDir
+
+if (-not $File) {
+    $userScripts = Get-ChildItem -Filter "*.user.js" -File
+    if ($userScripts.Count -eq 1) {
+        $File = $userScripts[0].Name
+        Write-Host "Kein -File angegeben, verwende einziges Skript: $File" -ForegroundColor Cyan
+    } else {
+        Write-Error "Mehrere .user.js-Dateien gefunden, bitte -File angeben:`n$($userScripts.Name -join "`n")"
+        exit 1
+    }
+}
 
 if (-not (Test-Path $File)) {
     Write-Error "Datei nicht gefunden: $File"
