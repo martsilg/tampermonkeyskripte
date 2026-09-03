@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         Mobile Ticket-Detailansicht
 // @namespace    https://github.com/martsilg/tampermonkeyskripte
-// @version      1.0.1
+// @version      1.0.2
 // @description  Kompaktere Tab-Leiste (horizontal scrollbar, Swipe-Wechsel) und kompaktere Aktions-Buttons für die Ticket-Detailseite auf dem Smartphone
 // @author       martsilg
 // @match        https://pf-prod.vossko.de/WebApp/MPA/Tickets/*/db_page_edit*
@@ -150,32 +150,42 @@
     }
   });
 
-  // --- Reihenfolge der Reiter anpassen: "Personal" direkt nach
-  // "Basisinformationen" statt an seiner ursprünglichen Position weiter
-  // hinten. Verschiebt sowohl den Reiter-Link (<li> in der Nav-Leiste) als
-  // auch sein zugehöriges Panel (<div id="tabs-staff">) im DOM an die neue
-  // Position - jQuery UI Tabs verknüpft Reiter und Panel per Index in der
-  // DOM-Reihenfolge, ein reines CSS-"order" auf nur einer der beiden Listen
-  // würde diese Zuordnung durcheinanderbringen (Klick auf Reiter X würde
-  // dann Panel Y zeigen).
-  function reorderPersonalTab() {
+  // --- Reihenfolge der Reiter anpassen: die hier gelisteten Reiter erscheinen
+  // in genau dieser Reihenfolge direkt nach "Basisinformationen", statt an
+  // ihrer ursprünglichen Position weiter hinten. Verschiebt sowohl den
+  // Reiter-Link (<li> in der Nav-Leiste) als auch sein zugehöriges Panel
+  // (<div id="tabs-...">) im DOM an die neue Position - jQuery UI Tabs
+  // verknüpft Reiter und Panel per Index in der DOM-Reihenfolge, ein reines
+  // CSS-"order" auf nur einer der beiden Listen würde diese Zuordnung
+  // durcheinanderbringen (Klick auf Reiter X würde dann Panel Y zeigen).
+  const TAB_ORDER_AFTER_FIRST = ['#tabs-qualification', '#tabs-staff'];
+
+  function reorderTabs() {
     const nav = document.querySelector('#tabs > ul.ui-tabs-nav');
     if (!nav || nav.dataset.tmReordered === '1') return;
 
     const firstLi = nav.querySelector(':scope > li');
-    const personalLi = nav.querySelector(':scope > li > a[href="#tabs-staff"]')?.closest('li');
-    if (!firstLi || !personalLi || firstLi === personalLi) return;
+    if (!firstLi) return;
 
-    const personalPanelId = personalLi.querySelector('a').getAttribute('href'); // "#tabs-staff"
-    const personalPanel = document.querySelector('#tabs > ' + personalPanelId);
+    let afterLi = firstLi;
+    let afterPanel = document.getElementById(
+      firstLi.querySelector('a').getAttribute('href').slice(1)
+    );
 
-    firstLi.insertAdjacentElement('afterend', personalLi);
-    if (personalPanel) {
-      const firstPanel = document.getElementById(
-        firstLi.querySelector('a').getAttribute('href').slice(1)
-      );
-      if (firstPanel) firstPanel.insertAdjacentElement('afterend', personalPanel);
-    }
+    TAB_ORDER_AFTER_FIRST.forEach(function (href) {
+      const li = nav.querySelector(':scope > li > a[href="' + href + '"]')?.closest('li');
+      if (!li || li === afterLi) return;
+
+      const panel = document.getElementById(href.slice(1));
+
+      afterLi.insertAdjacentElement('afterend', li);
+      if (afterPanel && panel) {
+        afterPanel.insertAdjacentElement('afterend', panel);
+      }
+
+      afterLi = li;
+      afterPanel = panel || afterPanel;
+    });
 
     nav.dataset.tmReordered = '1';
 
@@ -191,8 +201,8 @@
     }
   }
 
-  reorderPersonalTab();
-  const reorderObserver = new MutationObserver(reorderPersonalTab);
+  reorderTabs();
+  const reorderObserver = new MutationObserver(reorderTabs);
   const tabsContainer = document.getElementById('tabs');
   if (tabsContainer) {
     reorderObserver.observe(tabsContainer, { childList: true, subtree: false });
