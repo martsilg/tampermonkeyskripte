@@ -1,7 +1,7 @@
-// ==UserScript==
+﻿// ==UserScript==
 // @name         Mobile Ticket-Detailansicht
 // @namespace    https://github.com/martsilg/tampermonkeyskripte
-// @version      1.0.0
+// @version      1.0.1
 // @description  Kompaktere Tab-Leiste (horizontal scrollbar, Swipe-Wechsel) und kompaktere Aktions-Buttons für die Ticket-Detailseite auf dem Smartphone
 // @author       martsilg
 // @match        https://pf-prod.vossko.de/WebApp/MPA/Tickets/*/db_page_edit*
@@ -110,6 +110,12 @@
         max-width: 100%;
         overflow-x: hidden;
         box-sizing: border-box;
+        /* Panel füllt mindestens die restliche Bildschirmhöhe (unterhalb von
+           Header/Tab-Leiste), damit bei wenig Inhalt kein "totes", nicht auf
+           Swipe reagierendes Leerfeld darunter entsteht. 45vh als grober,
+           konservativer Richtwert - besser zu niedrig als eine Scrollbar zu
+           erzwingen, wo keine nötig wäre. */
+        min-height: 45vh;
       }
       #tabs > .ui-tabs-panel * {
         max-width: 100%;
@@ -143,6 +149,54 @@
       setTimeout(scrollActiveTabIntoView, 50);
     }
   });
+
+  // --- Reihenfolge der Reiter anpassen: "Personal" direkt nach
+  // "Basisinformationen" statt an seiner ursprünglichen Position weiter
+  // hinten. Verschiebt sowohl den Reiter-Link (<li> in der Nav-Leiste) als
+  // auch sein zugehöriges Panel (<div id="tabs-staff">) im DOM an die neue
+  // Position - jQuery UI Tabs verknüpft Reiter und Panel per Index in der
+  // DOM-Reihenfolge, ein reines CSS-"order" auf nur einer der beiden Listen
+  // würde diese Zuordnung durcheinanderbringen (Klick auf Reiter X würde
+  // dann Panel Y zeigen).
+  function reorderPersonalTab() {
+    const nav = document.querySelector('#tabs > ul.ui-tabs-nav');
+    if (!nav || nav.dataset.tmReordered === '1') return;
+
+    const firstLi = nav.querySelector(':scope > li');
+    const personalLi = nav.querySelector(':scope > li > a[href="#tabs-staff"]')?.closest('li');
+    if (!firstLi || !personalLi || firstLi === personalLi) return;
+
+    const personalPanelId = personalLi.querySelector('a').getAttribute('href'); // "#tabs-staff"
+    const personalPanel = document.querySelector('#tabs > ' + personalPanelId);
+
+    firstLi.insertAdjacentElement('afterend', personalLi);
+    if (personalPanel) {
+      const firstPanel = document.getElementById(
+        firstLi.querySelector('a').getAttribute('href').slice(1)
+      );
+      if (firstPanel) firstPanel.insertAdjacentElement('afterend', personalPanel);
+    }
+
+    nav.dataset.tmReordered = '1';
+
+    // jQuery UI Tabs neu synchronisieren, falls das Widget bereits
+    // initialisiert ist, damit intern Reiter-Index <-> Panel wieder stimmt.
+    if (window.jQuery) {
+      try {
+        window.jQuery('#tabs').tabs('refresh');
+      } catch (err) {
+        // Widget evtl. noch nicht initialisiert - nicht kritisch, das
+        // erneute Verschieben passiert dann einfach vor der Initialisierung.
+      }
+    }
+  }
+
+  reorderPersonalTab();
+  const reorderObserver = new MutationObserver(reorderPersonalTab);
+  const tabsContainer = document.getElementById('tabs');
+  if (tabsContainer) {
+    reorderObserver.observe(tabsContainer, { childList: true, subtree: false });
+  }
 
   // --- Swipe links/rechts zum Tab-Wechsel ---
   // Nur auf schmalen Viewports aktiv (mobile Nutzung). Wechselt zum
