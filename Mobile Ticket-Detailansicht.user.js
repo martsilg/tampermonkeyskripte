@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         Mobile Ticket-Detailansicht
 // @namespace    https://github.com/martsilg/tampermonkeyskripte
-// @version      1.0.2
+// @version      1.0.3
 // @description  Kompaktere Tab-Leiste (horizontal scrollbar, Swipe-Wechsel) und kompaktere Aktions-Buttons für die Ticket-Detailseite auf dem Smartphone
 // @author       martsilg
 // @match        https://pf-prod.vossko.de/WebApp/MPA/Tickets/*/db_page_edit*
@@ -63,39 +63,13 @@
         scroll-margin-inline: 12px;
       }
 
-      /* --- Fixe Aktions-Buttons unten: kompakter, als Raster statt gestapelt ---
-         Nur Container gridden, die nicht bereits per Inline-style="display:none"
-         als inaktiver Lifecycle-Status ausgeblendet sind (sonst werden z.B. die
-         Buttons des Status "Geschlossen" fälschlich neben denen von "Dispatch"
-         sichtbar, weil !important das Inline-display:none überschreibt). */
-      #footer .perfact-form--buttons {
-        display: grid !important;
-        grid-template-columns: 1fr 1fr !important;
-        gap: 6px !important;
-      }
-      #footer .perfact-layout--lcc-button-container:not([style*="display: none"]):not([style*="display:none"]) {
-        display: grid !important;
-        grid-template-columns: 1fr 1fr !important;
-        gap: 6px !important;
-      }
-      #footer .perfact-form--buttons .action,
-      #footer .perfact-layout--lcc-button-container button.lc_to {
-        width: 100% !important;
-        margin: 0 !important;
-        padding: 8px 4px !important;
-        font-size: 12px !important;
-        line-height: 1.2 !important;
-        min-height: 0 !important;
-        white-space: normal !important;
-      }
-      #footer .perfact-form--save-button .save_button button#save_button {
-        padding: 8px 12px !important;
-        font-size: 13px !important;
-      }
-      /* Footer insgesamt weniger Innenabstand, damit er weniger Platz frisst */
+      /* Original-Footer ausblenden - wird durch die schwebenden Mini-FABs
+         rechts unten ersetzt (siehe #tm-fab-stack). Bleibt im DOM (nur
+         unsichtbar), damit die Seiten-eigene Formularlogik/JS-Referenzen
+         auf die Original-Buttons weiter funktionieren; die FABs klicken
+         diese Originale per JS an statt eigene Aktionen nachzubauen. */
       #footer.perfact-layout--footer {
-        padding-top: 4px !important;
-        padding-bottom: 4px !important;
+        display: none !important;
       }
 
       /* --- Tab-Inhalt: Breite auf Viewport fixieren, kein Leerraum-Scroll ---
@@ -127,6 +101,44 @@
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
       }
+
+      /* --- Schwebende Mini-FABs rechts unten: Klone der Original-Aktions-
+         Buttons (Speichern/Freigeben/Klärungsbedarf/Schließen/...), fingerfreundlich
+         gestapelt statt in der bisherigen unteren Leiste. */
+      #tm-fab-stack {
+        position: fixed;
+        right: 12px;
+        bottom: max(12px, env(safe-area-inset-bottom));
+        z-index: 9999;
+        display: flex;
+        flex-direction: column-reverse; /* wichtigster Button (Speichern) unten, naeher am Daumen */
+        gap: 10px;
+        align-items: flex-end;
+      }
+      .tm-fab {
+        min-width: 56px;
+        height: 56px;
+        padding: 0 16px;
+        border-radius: 28px;
+        border: none;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 1.15;
+        color: #fff;
+        background: #6b7280;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        white-space: normal;
+      }
+      .tm-fab:active {
+        filter: brightness(0.9);
+      }
+      .tm-fab.tm-fab-save { background: #2563eb; }
+      .tm-fab.tm-fab-primary { background: #16a34a; }
+      .tm-fab.tm-fab-danger { background: #dc2626; }
     }
   `;
 
@@ -270,4 +282,101 @@
     if (Math.abs(dx) < SWIPE_MIN_DISTANCE_PX) return;
     goToAdjacentTab(dx < 0 ? 1 : -1); // nach links wischen = nächster Tab
   }, { passive: true });
+
+  // --- Schwebende Mini-FABs rechts unten statt der bisherigen unteren
+  // Button-Leiste. Baut keine eigene Aktionslogik nach, sondern klickt beim
+  // Antippen den jeweils passenden ORIGINAL-Button per JS an (der Original-
+  // Footer bleibt per CSS nur unsichtbar im DOM, siehe #footer.display:none
+  // oben) - dadurch bleiben alle serverseitigen Validierungen, Bestätigungs-
+  // Dialoge (data-confirm) und Lifecycle-Übergänge exakt wie im Original.
+  function isVisibleButton(btn) {
+    if (!btn || btn.disabled) return false;
+    // Container-Sichtbarkeit prüfen, nicht nur den Button selbst: inaktive
+    // Lifecycle-Status-Container tragen style="display:none" (z.B. Buttons
+    // für den Status "Geschlossen", während das Ticket in "Dispatch" ist).
+    // Die Traversierung stoppt bewusst VOR #footer: #footer selbst ist per
+    // eigenem CSS unsichtbar gemacht (siehe display:none oben) - das darf
+    // nicht als "Button ist für den aktuellen Status unsichtbar" gewertet
+    // werden, sonst würden ALLE Buttons als unsichtbar gelten.
+    let node = btn;
+    while (node && node.id !== 'footer' && node !== document.body) {
+      if (node.style && node.style.display === 'none') return false;
+      node = node.parentElement;
+    }
+    return true;
+  }
+
+  function fabColorClass(label) {
+    const l = label.toLowerCase();
+    if (l.includes('schließ') || l.includes('schliess')) return 'tm-fab-danger';
+    if (l.includes('freigeben') || l.includes('weiter')) return 'tm-fab-primary';
+    return '';
+  }
+
+  function collectActionButtons() {
+    const buttons = [];
+
+    const saveBtn = document.querySelector('#footer .save_button button#save_button');
+    if (saveBtn && isVisibleButton(saveBtn)) {
+      buttons.push({ original: saveBtn, label: saveBtn.textContent.trim() || 'Speichern', cls: 'tm-fab-save' });
+    }
+
+    document.querySelectorAll('#footer .perfact-form--buttons .action').forEach(function (btn) {
+      if (!isVisibleButton(btn)) return;
+      const label = btn.textContent.trim();
+      buttons.push({ original: btn, label: label, cls: fabColorClass(label) });
+    });
+
+    document.querySelectorAll('#footer .perfact-layout--lcc-button-container button.lc_to').forEach(function (btn) {
+      if (!isVisibleButton(btn)) return;
+      const label = btn.textContent.trim();
+      buttons.push({ original: btn, label: label, cls: fabColorClass(label) });
+    });
+
+    return buttons;
+  }
+
+  function rebuildFabStack() {
+    if (!isNarrowViewport()) {
+      const existing = document.getElementById('tm-fab-stack');
+      if (existing) existing.remove();
+      return;
+    }
+
+    let stack = document.getElementById('tm-fab-stack');
+    if (!stack) {
+      stack = document.createElement('div');
+      stack.id = 'tm-fab-stack';
+      document.body.appendChild(stack);
+    }
+    stack.innerHTML = '';
+
+    collectActionButtons().forEach(function (entry) {
+      const fab = document.createElement('button');
+      fab.type = 'button';
+      fab.className = 'tm-fab' + (entry.cls ? ' ' + entry.cls : '');
+      fab.textContent = entry.label;
+      fab.addEventListener('click', function () {
+        entry.original.click();
+      });
+      stack.appendChild(fab);
+    });
+  }
+
+  rebuildFabStack();
+  window.addEventListener('resize', rebuildFabStack);
+  const fabObserver = new MutationObserver(function () {
+    // Debounced über rAF, da Formular-Interaktionen viele DOM-Mutationen
+    // in kurzer Folge auslösen können.
+    if (fabObserver._pending) return;
+    fabObserver._pending = true;
+    requestAnimationFrame(function () {
+      fabObserver._pending = false;
+      rebuildFabStack();
+    });
+  });
+  const footerEl = document.getElementById('footer');
+  if (footerEl) {
+    fabObserver.observe(footerEl, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'disabled'] });
+  }
 })();
