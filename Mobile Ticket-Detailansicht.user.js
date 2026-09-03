@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         Mobile Ticket-Detailansicht
 // @namespace    https://github.com/martsilg/tampermonkeyskripte
-// @version      1.0.3
+// @version      1.0.4
 // @description  Kompaktere Tab-Leiste (horizontal scrollbar, Swipe-Wechsel) und kompaktere Aktions-Buttons für die Ticket-Detailseite auf dem Smartphone
 // @author       martsilg
 // @match        https://pf-prod.vossko.de/WebApp/MPA/Tickets/*/db_page_edit*
@@ -139,6 +139,21 @@
       .tm-fab.tm-fab-save { background: #2563eb; }
       .tm-fab.tm-fab-primary { background: #16a34a; }
       .tm-fab.tm-fab-danger { background: #dc2626; }
+
+      /* Ein-/Ausblenden-Handle: bleibt immer sichtbar, blendet die
+         restlichen FABs darüber ein/aus. */
+      .tm-fab-handle {
+        width: 40px;
+        height: 40px;
+        min-width: 40px;
+        border-radius: 50%;
+        background: #374151;
+        font-size: 16px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      }
+      #tm-fab-stack.tm-collapsed .tm-fab:not(.tm-fab-handle) {
+        display: none;
+      }
     }
   `;
 
@@ -336,6 +351,25 @@
     return buttons;
   }
 
+  const FAB_COLLAPSED_KEY = 'tmTicketFabCollapsed';
+
+  function isFabCollapsed() {
+    try {
+      return localStorage.getItem(FAB_COLLAPSED_KEY) === '1';
+    } catch (err) {
+      return false; // z.B. privater Modus ohne localStorage-Zugriff
+    }
+  }
+
+  function setFabCollapsed(collapsed) {
+    try {
+      localStorage.setItem(FAB_COLLAPSED_KEY, collapsed ? '1' : '0');
+    } catch (err) {
+      // localStorage nicht verfügbar - Zustand bleibt dann nur für die
+      // aktuelle Seitenansicht erhalten (kein Fehler, nur kein Merken).
+    }
+  }
+
   function rebuildFabStack() {
     if (!isNarrowViewport()) {
       const existing = document.getElementById('tm-fab-stack');
@@ -350,6 +384,7 @@
       document.body.appendChild(stack);
     }
     stack.innerHTML = '';
+    stack.classList.toggle('tm-collapsed', isFabCollapsed());
 
     collectActionButtons().forEach(function (entry) {
       const fab = document.createElement('button');
@@ -361,6 +396,21 @@
       });
       stack.appendChild(fab);
     });
+
+    // Handle zuletzt anhängen: dank column-reverse landet er unten, direkt
+    // erreichbar, unabhängig davon wie viele Aktions-FABs es gerade gibt.
+    const handle = document.createElement('button');
+    handle.type = 'button';
+    handle.className = 'tm-fab tm-fab-handle';
+    handle.setAttribute('aria-label', 'Aktions-Buttons ein-/ausblenden');
+    handle.textContent = isFabCollapsed() ? '‹' : '›';
+    handle.addEventListener('click', function () {
+      const collapsed = !stack.classList.contains('tm-collapsed');
+      stack.classList.toggle('tm-collapsed', collapsed);
+      setFabCollapsed(collapsed);
+      handle.textContent = collapsed ? '‹' : '›';
+    });
+    stack.appendChild(handle);
   }
 
   rebuildFabStack();
