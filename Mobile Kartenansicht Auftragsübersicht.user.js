@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Mobile Kartenansicht Auftragsübersicht
 // @namespace    https://github.com/martsilg/tampermonkeyskripte
-// @version      1.0.0
-// @description  PowerApps-artige Kartenansicht für die mobile Ticket-Übersicht (Bearbeiter, Priorität, Betreff)
+// @version      1.1.0
+// @description  PowerApps-artige Kartenansicht für die mobile Ticket-Übersicht (Betreff, Status, Priorität, Bearbeiter, Pool, Termine, Arbeitszeit, aktueller Stand)
 // @author       martsilg
 // @match        https://pf-prod.vossko.de/WebApp/MPA/Tickets/Dispatch/*
 // @match        https://pf-prod.vossko.de/WebApp/MPA/Tickets/Work/*
@@ -60,20 +60,61 @@
     return 'tm-prio-medium';
   }
 
+  // Tooltips können HTML enthalten (data-bs-html) - per <template> in reinen
+  // Text umwandeln. Inhalte eines <template> werden nicht ausgeführt.
+  function plainText(html) {
+    if (html.indexOf('<') === -1) return html;
+    const tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    return tpl.content.textContent;
+  }
+
   function textOf(row, colClass) {
     const cell = row.querySelector('td.' + colClass + ' .limiter');
     if (!cell) return '';
-    return (cell.getAttribute('data-bs-original-title') || cell.textContent || '').trim();
+    return plainText(cell.getAttribute('data-bs-original-title') || cell.textContent || '').replace(/\s+/g, ' ').trim();
   }
+
+  // Erster nicht leerer Wert aus mehreren möglichen Spalten - die Übersichten
+  // blenden je nach Konfiguration unterschiedliche Spalten ein.
+  function firstTextOf(row, colClasses) {
+    for (let i = 0; i < colClasses.length; i++) {
+      const v = textOf(row, colClasses[i]);
+      if (v) return v;
+    }
+    return '';
+  }
+
+  // Fälligkeit im Format TT.MM.JJJJ (ggf. mit Uhrzeit) liegt in der Vergangenheit?
+  function isOverdue(dueText) {
+    const m = dueText.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+(\d{1,2}):(\d{2}))?/);
+    if (!m) return false;
+    const due = new Date(+m[3], +m[2] - 1, +m[1], m[4] ? +m[4] : 23, m[5] ? +m[5] : 59);
+    return due.getTime() < Date.now();
+  }
+
+  // Zusätzliche Felder der Karte: [Beschriftung, Spalten in Prioritätsreihenfolge]
+  const DETAIL_FIELDS = [
+    ['Status',       ['lookup_tsticket_tsticketlc_id']],
+    ['Priorität',    ['lookup_tsticket_tsprio_id']],
+    ['Bearbeiter',   ['tsticket_staff']],
+    ['Arbeitspool',  ['lookup_tsticket_tspool_id']],
+    ['Angelegt am',  ['tsticket_createtime']],
+    ['Fälligkeit',   ['tsticket_due']],
+    ['Angelegt von', ['tsticket_creatorfullname', 'tsticket_creator']],
+    ['Arbeitszeit',  ['tsticket_worktimehours', 'tsticket_worktimeworkerhours', 'tsticket_workhours', 'tsticket_hours']]
+  ];
 
   function buildCard(row) {
     const bearbeiter = textOf(row, 'tsticket_staff');
     const prio = textOf(row, 'lookup_tsticket_tsprio_id');
     const bezeichnung = textOf(row, 'tsticket_tssubjectmattername');
     const betreff = textOf(row, 'tsticket_subject');
-    const angelegt = textOf(row, 'tsticket_createtime');
     const meldungsId = textOf(row, 'tsticket_number');
-    const pool = textOf(row, 'lookup_tsticket_tspool_id');
+    // Aktueller Stand: sichtbarer Zellentext statt Tooltip - so liest ihn
+    // auch das Edge-Addon (ticket-monitor-edge).
+    const standCell = row.querySelector('td.latest_tsticketlog .limiter');
+    const stand = standCell ? standCell.textContent.replace(/\s+/g, ' ').trim() : '';
 
     row.classList.add('tm-card', priorityClass(prio));
     row.setAttribute(DONE_ATTR, '1');
@@ -99,14 +140,48 @@
     subtitle.className = 'tm-card-subtitle';
     subtitle.textContent = bezeichnung;
 
-    const meta = document.createElement('div');
-    meta.className = 'tm-card-meta';
-    const metaParts = [bearbeiter, angelegt, pool, meldungsId ? '#' + meldungsId : ''].filter(Boolean);
-    meta.textContent = metaParts.join(' · ');
+    if (meldungsId) {
+      const idEl = document.createElement('span');
+      idEl.className = 'tm-card-id';
+      idEl.textContent = '#' + meldungsId;
+      title.prepend(idEl);
+    }
+
+    // Raster mit Beschriftung/Wert. Felder ohne Wert (Spalte in der
+    // Übersicht nicht eingeblendet oder leer) entfallen.
+    const details = document.createElement('dl');
+    details.className = 'tm-card-details';
+    DETAIL_FIELDS.forEach(function (field) {
+      let value = firstTextOf(row, field[1]);
+      if (!value) return;
+      if (field[0] === 'Arbeitszeit') value += ' h';
+      const item = document.createElement('div');
+      item.className = 'tm-card-field';
+      if (field[0] === 'Fälligkeit' && isOverdue(value)) item.classList.add('tm-card-overdue');
+      const dt = document.createElement('dt');
+      dt.textContent = field[0];
+      const dd = document.createElement('dd');
+      dd.textContent = value;
+      item.appendChild(dt);
+      item.appendChild(dd);
+      details.appendChild(item);
+    });
 
     body.appendChild(title);
     if (bezeichnung && bezeichnung !== betreff) body.appendChild(subtitle);
-    body.appendChild(meta);
+    if (details.children.length) body.appendChild(details);
+    if (stand) {
+      const standEl = document.createElement('div');
+      standEl.className = 'tm-card-stand';
+      const standLabel = document.createElement('span');
+      standLabel.className = 'tm-card-stand-label';
+      standLabel.textContent = 'Aktueller Stand';
+      const standText = document.createElement('span');
+      standText.textContent = stand;
+      standEl.appendChild(standLabel);
+      standEl.appendChild(standText);
+      body.appendChild(standEl);
+    }
 
     wrap.appendChild(avatar);
     wrap.appendChild(body);
@@ -189,14 +264,55 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      .tm-card-meta {
+      .tm-card-id {
         font-size: 11px;
+        font-weight: 600;
+        color: #6b7280;
+        margin-right: 6px;
+      }
+      .tm-card-details {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 4px 10px;
+        margin: 8px 0 0;
+      }
+      .tm-card-field { min-width: 0; }
+      .tm-card-field dt {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
         color: #9ca3af;
-        margin-top: 6px;
+        margin: 0;
+      }
+      .tm-card-field dd {
+        font-size: 12px;
+        color: #374151;
+        margin: 0;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+      .tm-card-overdue dd { color: #dc2626; font-weight: 600; }
+      .tm-card-stand {
+        margin-top: 8px;
+        padding: 6px 8px;
+        border-radius: 6px;
+        background: #f3f4f6;
+        font-size: 12px;
+        color: #374151;
+        line-height: 1.35;
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+      }
+      .tm-card-stand-label {
+        font-weight: 600;
+        color: #6b7280;
+        margin-right: 4px;
+      }
+      .tm-card-stand-label::after { content: ':'; }
     }
   `;
 
