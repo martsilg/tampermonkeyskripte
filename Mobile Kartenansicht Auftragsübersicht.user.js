@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobile Kartenansicht Auftragsübersicht
 // @namespace    https://github.com/martsilg/tampermonkeyskripte
-// @version      1.2.0
+// @version      1.2.1
 // @description  PowerApps-artige Kartenansicht für die mobile Ticket-Übersicht (Betreff, Status, Priorität, Bearbeiter, Pool, Termine, Arbeitszeit, aktueller Stand) mit Pool-Leiste und Wischen zwischen den Pools
 // @author       martsilg
 // @match        https://pf-prod.vossko.de/WebApp/MPA/Tickets/Dispatch/*
@@ -230,6 +230,13 @@
       tr.tm-card.tm-prio-weekend  { border-left-color: #a855f7; }
       tr.tm-card.tm-prio-medium   { border-left-color: #3b82f6; }
       tr.tm-card.tm-prio-low      { border-left-color: #9ca3af; }
+
+      /* Legende über der Liste ("Neue Nachricht aus der Produktion",
+         "Störungsauftrag") kostet auf dem Handy nur Höhe. Per CSS statt
+         Entfernen, weil perfact Teile
+         der Seite bei Suchvorgängen neu aufbaut (wie im Edge-Addon,
+         Feature hideLegend). */
+      .legend-container { display: none !important; }
 
       tr.tm-card td.tm-card-hidden-cell { display: none !important; }
       tr.tm-card td.click_entry { display: none !important; }
