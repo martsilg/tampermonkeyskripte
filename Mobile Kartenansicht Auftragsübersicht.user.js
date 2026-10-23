@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobile Kartenansicht Auftragsübersicht
 // @namespace    https://github.com/martsilg/tampermonkeyskripte
-// @version      1.1.1
+// @version      1.1.2
 // @description  PowerApps-artige Kartenansicht für die mobile Ticket-Übersicht (Betreff, Status, Priorität, Bearbeiter, Pool, Termine, Arbeitszeit, aktueller Stand)
 // @author       martsilg
 // @match        https://pf-prod.vossko.de/WebApp/MPA/Tickets/Dispatch/*
@@ -225,7 +225,7 @@
         border-left: 6px solid #9ca3af;
         overflow: hidden;
       }
-      tr.tm-card.tm-prio-critical { border-left-color: #dc2626; }
+      tr.tm-card.tm-prio-critical { border-left-color: #dc2626; background: #fde8e8; }
       tr.tm-card.tm-prio-high     { border-left-color: #f97316; }
       tr.tm-card.tm-prio-weekend  { border-left-color: #a855f7; }
       tr.tm-card.tm-prio-medium   { border-left-color: #3b82f6; }
