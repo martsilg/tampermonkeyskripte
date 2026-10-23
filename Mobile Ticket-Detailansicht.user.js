@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         Mobile Ticket-Detailansicht
 // @namespace    https://github.com/martsilg/tampermonkeyskripte
-// @version      1.1.0
+// @version      1.1.1
 // @description  Kompaktere Tab-Leiste (horizontal scrollbar, Swipe-Wechsel), kompaktere Aktions-Buttons und Personal-Auswahl mit Favoriten für die Ticket-Detailseite auf dem Smartphone
 // @author       martsilg
 // @match        https://pf-prod.vossko.de/WebApp/MPA/Tickets/*/db_page_edit*
@@ -464,6 +464,11 @@
       box-shadow: 0 -4px 16px rgba(0,0,0,0.25);
       padding-bottom: env(safe-area-inset-bottom);
       font-size: 14px;
+      /* Im Dunkelmodus des Handys färbt der Browser Buttons und Eingabe-
+         felder ohne eigene Farbe hell ein - auf dem weißen Fenster waren
+         die Namen dadurch weiß auf weiß. Helles Schema erzwingen. */
+      color-scheme: light;
+      color: #111;
     }
     .tm-ss-head {
       display: flex;
@@ -475,7 +480,7 @@
     .tm-ss-close {
       width: 40px; height: 40px;
       border: none; border-radius: 50%;
-      background: #f1f1f1; font-size: 18px;
+      background: #f1f1f1; font-size: 18px; color: #111;
     }
     .tm-ss-search {
       margin: 0 12px 8px;
@@ -483,6 +488,8 @@
       border: 1px solid #ccc;
       border-radius: 8px;
       font-size: 15px;
+      color: #111;
+      background: #fff;
     }
     .tm-ss-body {
       overflow-y: auto;
@@ -524,6 +531,7 @@
       padding: 0 4px 0 10px;
       text-align: left;
       font-size: 14px;
+      color: #111;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
