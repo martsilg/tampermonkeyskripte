@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobile Kartenansicht Auftragsübersicht
 // @namespace    https://github.com/martsilg/tampermonkeyskripte
-// @version      1.2.1
+// @version      1.2.2
 // @description  PowerApps-artige Kartenansicht für die mobile Ticket-Übersicht (Betreff, Status, Priorität, Bearbeiter, Pool, Termine, Arbeitszeit, aktueller Stand) mit Pool-Leiste und Wischen zwischen den Pools
 // @author       martsilg
 // @match        https://pf-prod.vossko.de/WebApp/MPA/Tickets/Dispatch/*
@@ -225,7 +225,12 @@
         border-left: 6px solid #9ca3af;
         overflow: hidden;
       }
-      tr.tm-card.tm-prio-critical { border-left-color: #dc2626; background: #fde8e8; }
+      /* Rötlicher Hintergrund für Prio >= 400. Zusätzlich auf der inneren
+         Kartenfläche, die die ganze sichtbare Karte ausfüllt: Am <tr> selbst
+         kann eine Zeilenfarbe von perfact (gerade/ungerade) oder ein Inline-
+         Style eines anderen Skripts die Regel überdecken. */
+      tr.tm-card.tm-prio-critical { border-left-color: #dc2626; background: #fde8e8 !important; }
+      tr.tm-card.tm-prio-critical > .tm-card-inner { background: #fde8e8; }
       tr.tm-card.tm-prio-high     { border-left-color: #f97316; }
       tr.tm-card.tm-prio-weekend  { border-left-color: #a855f7; }
       tr.tm-card.tm-prio-medium   { border-left-color: #3b82f6; }
