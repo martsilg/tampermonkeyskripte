@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobile Kartenansicht Auftragsübersicht
 // @namespace    https://github.com/martsilg/tampermonkeyskripte
-// @version      1.3.0
+// @version      1.3.1
 // @description  PowerApps-artige Kartenansicht für die mobile Ticket-Übersicht (Betreff, Status, Priorität, Bearbeiter, Pool, Termine, Arbeitszeit, aktueller Stand) mit Pool-Leiste und Wischen zwischen den Pools
 // @author       martsilg
 // @match        https://pf-prod.vossko.de/WebApp/MPA/Tickets/Dispatch/*
@@ -257,9 +257,11 @@
       /* Status-Versatz im Meldungspool (siehe statusShiftClass): Grundabstand
          6px je Seite, verschoben wird über die Außenabstände - so ragt die
          Karte nie über den Bildschirmrand und es entsteht kein Seitwärts-
-         Scrollen. */
-      tr.tm-card.tm-shift-right { margin-left: 22px; margin-right: 0; }
-      tr.tm-card.tm-shift-left  { margin-left: 0; margin-right: 22px; }
+         Scrollen. !important, weil perfacts mobile Tabellen-CSS eigene
+         Zeilenabstände setzt (auf dem Handy sichtbar am großen Abstand
+         zwischen den Karten) und den Versatz ohne !important überdeckte. */
+      tr.tm-card.tm-shift-right { margin-left: 22px !important; margin-right: 0 !important; }
+      tr.tm-card.tm-shift-left  { margin-left: 0 !important; margin-right: 22px !important; }
       tr.tm-card.tm-prio-high     { border-left-color: #f97316; }
       tr.tm-card.tm-prio-weekend  { border-left-color: #a855f7; }
       tr.tm-card.tm-prio-medium   { border-left-color: #3b82f6; }
