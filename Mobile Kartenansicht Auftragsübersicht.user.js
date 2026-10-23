@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobile Kartenansicht Auftragsübersicht
 // @namespace    https://github.com/martsilg/tampermonkeyskripte
-// @version      1.2.2
+// @version      1.3.0
 // @description  PowerApps-artige Kartenansicht für die mobile Ticket-Übersicht (Betreff, Status, Priorität, Bearbeiter, Pool, Termine, Arbeitszeit, aktueller Stand) mit Pool-Leiste und Wischen zwischen den Pools
 // @author       martsilg
 // @match        https://pf-prod.vossko.de/WebApp/MPA/Tickets/Dispatch/*
@@ -133,6 +133,25 @@
     return grid.children.length ? grid : null;
   }
 
+  // Versatz der Karte nach Status, nur im Meldungspool: "30: Bearbeitung"
+  // nach rechts gerückt (wirkt wie bereits gezogen), "15: zur Bearbeitung
+  // freigegeben" nach links (wartet noch darauf, gezogen zu werden).
+  // Eigene Pfadprüfung statt POOLS/currentPoolIndex: buildCard läuft schon,
+  // bevor die weiter unten deklarierten Pool-Konstanten initialisiert sind.
+  function isWorkPoolList() {
+    const path = location.pathname;
+    return /\/WebApp\/MPA\/Tickets\/Work\//.test(path) && !/db_page_edit/.test(path);
+  }
+
+  function statusShiftClass(statusText) {
+    const m = statusText.match(/^\s*(\d+)/);
+    if (!m) return '';
+    const num = parseInt(m[1], 10);
+    if (num === 30) return 'tm-shift-right';
+    if (num === 15) return 'tm-shift-left';
+    return '';
+  }
+
   function buildCard(row) {
     const bearbeiter = textOf(row, 'tsticket_staff');
     const prio = textOf(row, 'lookup_tsticket_tsprio_id');
@@ -145,6 +164,10 @@
     const stand = standCell ? standCell.textContent.replace(/\s+/g, ' ').trim() : '';
 
     row.classList.add('tm-card', priorityClass(prio));
+    if (isWorkPoolList()) {
+      const shift = statusShiftClass(textOf(row, 'lookup_tsticket_tsticketlc_id'));
+      if (shift) row.classList.add(shift);
+    }
     row.setAttribute(DONE_ATTR, '1');
 
     const wrap = document.createElement('div');
@@ -231,6 +254,12 @@
          Style eines anderen Skripts die Regel überdecken. */
       tr.tm-card.tm-prio-critical { border-left-color: #dc2626; background: #fde8e8 !important; }
       tr.tm-card.tm-prio-critical > .tm-card-inner { background: #fde8e8; }
+      /* Status-Versatz im Meldungspool (siehe statusShiftClass): Grundabstand
+         6px je Seite, verschoben wird über die Außenabstände - so ragt die
+         Karte nie über den Bildschirmrand und es entsteht kein Seitwärts-
+         Scrollen. */
+      tr.tm-card.tm-shift-right { margin-left: 22px; margin-right: 0; }
+      tr.tm-card.tm-shift-left  { margin-left: 0; margin-right: 22px; }
       tr.tm-card.tm-prio-high     { border-left-color: #f97316; }
       tr.tm-card.tm-prio-weekend  { border-left-color: #a855f7; }
       tr.tm-card.tm-prio-medium   { border-left-color: #3b82f6; }
