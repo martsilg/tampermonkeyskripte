@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Mobile Kartenansicht Auftragsübersicht
 // @namespace    https://github.com/martsilg/tampermonkeyskripte
-// @version      1.1.2
-// @description  PowerApps-artige Kartenansicht für die mobile Ticket-Übersicht (Betreff, Status, Priorität, Bearbeiter, Pool, Termine, Arbeitszeit, aktueller Stand)
+// @version      1.2.0
+// @description  PowerApps-artige Kartenansicht für die mobile Ticket-Übersicht (Betreff, Status, Priorität, Bearbeiter, Pool, Termine, Arbeitszeit, aktueller Stand) mit Pool-Leiste und Wischen zwischen den Pools
 // @author       martsilg
 // @match        https://pf-prod.vossko.de/WebApp/MPA/Tickets/Dispatch/*
 // @match        https://pf-prod.vossko.de/WebApp/MPA/Tickets/Work/*
@@ -351,4 +351,152 @@
 
   // Fallback-Tick für dynamisch nachgeladene Zeilen ohne DOM-Insert-Event
   setInterval(upgradeAll, 2000);
+
+  // --- Pool-Leiste oben + Wischen zwischen den Pools ---
+  // Reihenfolge = Wischrichtung: nach links wischen geht einen Pool weiter.
+  // Nur auf den Übersichten (db_page_search bzw. Pool-Startseite), nicht
+  // auf der Ticket-Detailseite - dort wechselt Wischen schon die Reiter
+  // (Skript "Mobile Ticket-Detailansicht"), das würde sich überlagern.
+  const POOLS = [
+    { key: 'Dispatch', label: 'Auftragsverteilung', short: 'Verteilung' },
+    { key: 'Work',     label: 'Meldungspool',       short: 'Meldungspool' },
+    { key: 'Released', label: 'Freigabe',           short: 'Freigabe' },
+    { key: 'Closed',   label: 'Geschlossen',        short: 'Geschlossen' }
+  ];
+  const POOL_SWIPE_MIN_PX = 80;
+  const POOL_SWIPE_MAX_VERTICAL_PX = 50;
+  const POOL_SWIPE_MAX_MS = 600;
+  // Vom Bildschirmrand aus wischt Android "Zurück" - dort nicht reagieren.
+  const POOL_SWIPE_EDGE_PX = 24;
+
+  function currentPoolIndex() {
+    const path = location.pathname;
+    if (/db_page_edit/.test(path)) return -1; // Ticket-Detailseite
+    const m = path.match(/\/WebApp\/MPA\/Tickets\/(Dispatch|Work|Released|Closed)\//);
+    if (!m) return -1;
+    return POOLS.findIndex(function (p) { return p.key === m[1]; });
+  }
+
+  function poolUrl(pool) {
+    return location.origin + '/WebApp/MPA/Tickets/' + pool.key + '/db_page_search';
+  }
+
+  function goToPool(idx) {
+    if (idx < 0 || idx >= POOLS.length) return; // am Rand: kein Umlauf
+    const bar = document.getElementById('tm-pool-bar');
+    if (bar) {
+      bar.querySelectorAll('.tm-pool-tab').forEach(function (a, i) {
+        a.classList.toggle('tm-pool-active', i === idx);
+        a.classList.toggle('tm-pool-loading', i === idx);
+      });
+    }
+    location.href = poolUrl(POOLS[idx]);
+  }
+
+  const poolCss = `
+    @media (max-width: 900px) {
+      #tm-pool-bar {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        display: flex;
+        gap: 4px;
+        padding: 6px;
+        margin: 0 0 4px;
+        background: #f9fafb;
+        border-bottom: 1px solid #e5e7eb;
+        color-scheme: light;
+      }
+      .tm-pool-tab {
+        flex: 1 1 0;
+        min-width: 0;
+        padding: 7px 2px;
+        border-radius: 6px;
+        text-align: center;
+        font-size: 11.5px;
+        font-weight: 600;
+        color: #4b5563 !important;
+        text-decoration: none !important;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .tm-pool-tab.tm-pool-active {
+        background: #2563eb;
+        color: #fff !important;
+      }
+      .tm-pool-tab.tm-pool-loading { opacity: 0.6; }
+    }
+  `;
+
+  function buildPoolBar(anchorTable) {
+    if (document.getElementById('tm-pool-bar')) return;
+    const idx = currentPoolIndex();
+    const bar = document.createElement('nav');
+    bar.id = 'tm-pool-bar';
+    bar.setAttribute('aria-label', 'Pool wechseln');
+    POOLS.forEach(function (pool, i) {
+      const a = document.createElement('a');
+      a.className = 'tm-pool-tab' + (i === idx ? ' tm-pool-active' : '');
+      a.href = poolUrl(pool);
+      a.textContent = pool.short;
+      a.title = pool.label;
+      if (i === idx) a.setAttribute('aria-current', 'page');
+      bar.appendChild(a);
+    });
+    anchorTable.parentNode.insertBefore(bar, anchorTable);
+  }
+
+  function initPoolNavigation() {
+    if (currentPoolIndex() === -1) return;
+
+    const poolStyle = document.createElement('style');
+    poolStyle.textContent = poolCss;
+    document.head.appendChild(poolStyle);
+
+    // Leiste direkt über der Ticket-Tabelle. Die Tabelle kann nachgeladen
+    // werden - deshalb wiederholt versuchen, bis sie da ist.
+    function tryBuild() {
+      const row = document.querySelector(ROW_SEL);
+      const table = row ? row.closest('table') : document.querySelector('table');
+      if (table && table.parentNode) buildPoolBar(table);
+      return !!document.getElementById('tm-pool-bar');
+    }
+    if (!tryBuild()) {
+      const retry = setInterval(function () { if (tryBuild()) clearInterval(retry); }, 500);
+      setTimeout(function () { clearInterval(retry); }, 15000);
+    }
+
+    let startX = 0;
+    let startY = 0;
+    let startTime = 0;
+    let tracking = false;
+
+    document.addEventListener('touchstart', function (e) {
+      tracking = false;
+      if (window.innerWidth > 900 || e.touches.length !== 1) return;
+      if (e.target.closest('input, textarea, select, [contenteditable], .modal, .dropdown-menu')) return;
+      const x = e.touches[0].clientX;
+      if (x < POOL_SWIPE_EDGE_PX || x > window.innerWidth - POOL_SWIPE_EDGE_PX) return;
+      startX = x;
+      startY = e.touches[0].clientY;
+      startTime = Date.now();
+      tracking = true;
+    }, { passive: true });
+
+    document.addEventListener('touchend', function (e) {
+      if (!tracking) return;
+      tracking = false;
+      const t = e.changedTouches && e.changedTouches[0];
+      if (!t) return;
+      const dx = t.clientX - startX;
+      const dy = t.clientY - startY;
+      if (Date.now() - startTime > POOL_SWIPE_MAX_MS) return;
+      if (Math.abs(dy) > POOL_SWIPE_MAX_VERTICAL_PX) return; // eher Scrollen
+      if (Math.abs(dx) < POOL_SWIPE_MIN_PX) return;
+      goToPool(currentPoolIndex() + (dx < 0 ? 1 : -1)); // nach links = nächster Pool
+    }, { passive: true });
+  }
+
+  initPoolNavigation();
 })();
