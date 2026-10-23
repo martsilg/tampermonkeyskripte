@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobile Kartenansicht Auftragsübersicht
 // @namespace    https://github.com/martsilg/tampermonkeyskripte
-// @version      1.1.0
+// @version      1.1.1
 // @description  PowerApps-artige Kartenansicht für die mobile Ticket-Übersicht (Betreff, Status, Priorität, Bearbeiter, Pool, Termine, Arbeitszeit, aktueller Stand)
 // @author       martsilg
 // @match        https://pf-prod.vossko.de/WebApp/MPA/Tickets/Dispatch/*
@@ -93,17 +93,45 @@
     return due.getTime() < Date.now();
   }
 
-  // Zusätzliche Felder der Karte: [Beschriftung, Spalten in Prioritätsreihenfolge]
-  const DETAIL_FIELDS = [
+  // Felder der Karte: [Beschriftung, Spalten in Prioritätsreihenfolge].
+  // Zwei Gruppen: was sich während der Bearbeitung ändert, steht oben;
+  // Stammdaten, die beim Anlegen feststehen, gesammelt in einem Kasten unten.
+  const WORK_FIELDS = [
     ['Status',       ['lookup_tsticket_tsticketlc_id']],
     ['Priorität',    ['lookup_tsticket_tsprio_id']],
     ['Bearbeiter',   ['tsticket_staff']],
-    ['Arbeitspool',  ['lookup_tsticket_tspool_id']],
-    ['Angelegt am',  ['tsticket_createtime']],
     ['Fälligkeit',   ['tsticket_due']],
-    ['Angelegt von', ['tsticket_creatorfullname', 'tsticket_creator']],
     ['Arbeitszeit',  ['tsticket_worktimehours', 'tsticket_worktimeworkerhours', 'tsticket_workhours', 'tsticket_hours']]
   ];
+  const MASTER_FIELDS = [
+    ['Angelegt von', ['tsticket_creatorfullname', 'tsticket_creator']],
+    ['Angelegt am',  ['tsticket_createtime']],
+    ['Arbeitspool',  ['lookup_tsticket_tspool_id']]
+  ];
+
+  // Raster mit Beschriftung/Wert. Felder ohne Wert (Spalte in der
+  // Übersicht nicht eingeblendet oder leer) entfallen. Liefert null,
+  // wenn kein einziges Feld einen Wert hat.
+  function buildFieldGrid(row, fields, className) {
+    const grid = document.createElement('dl');
+    grid.className = 'tm-card-details ' + className;
+    fields.forEach(function (field) {
+      let value = firstTextOf(row, field[1]);
+      if (!value) return;
+      if (field[0] === 'Arbeitszeit') value += ' h';
+      const item = document.createElement('div');
+      item.className = 'tm-card-field';
+      if (field[0] === 'Fälligkeit' && isOverdue(value)) item.classList.add('tm-card-overdue');
+      const dt = document.createElement('dt');
+      dt.textContent = field[0];
+      const dd = document.createElement('dd');
+      dd.textContent = value;
+      item.appendChild(dt);
+      item.appendChild(dd);
+      grid.appendChild(item);
+    });
+    return grid.children.length ? grid : null;
+  }
 
   function buildCard(row) {
     const bearbeiter = textOf(row, 'tsticket_staff');
@@ -147,29 +175,12 @@
       title.prepend(idEl);
     }
 
-    // Raster mit Beschriftung/Wert. Felder ohne Wert (Spalte in der
-    // Übersicht nicht eingeblendet oder leer) entfallen.
-    const details = document.createElement('dl');
-    details.className = 'tm-card-details';
-    DETAIL_FIELDS.forEach(function (field) {
-      let value = firstTextOf(row, field[1]);
-      if (!value) return;
-      if (field[0] === 'Arbeitszeit') value += ' h';
-      const item = document.createElement('div');
-      item.className = 'tm-card-field';
-      if (field[0] === 'Fälligkeit' && isOverdue(value)) item.classList.add('tm-card-overdue');
-      const dt = document.createElement('dt');
-      dt.textContent = field[0];
-      const dd = document.createElement('dd');
-      dd.textContent = value;
-      item.appendChild(dt);
-      item.appendChild(dd);
-      details.appendChild(item);
-    });
+    const workGrid = buildFieldGrid(row, WORK_FIELDS, 'tm-card-work');
+    const masterGrid = buildFieldGrid(row, MASTER_FIELDS, 'tm-card-master');
 
     body.appendChild(title);
     if (bezeichnung && bezeichnung !== betreff) body.appendChild(subtitle);
-    if (details.children.length) body.appendChild(details);
+    if (workGrid) body.appendChild(workGrid);
     if (stand) {
       const standEl = document.createElement('div');
       standEl.className = 'tm-card-stand';
@@ -182,6 +193,7 @@
       standEl.appendChild(standText);
       body.appendChild(standEl);
     }
+    if (masterGrid) body.appendChild(masterGrid);
 
     wrap.appendChild(avatar);
     wrap.appendChild(body);
@@ -294,6 +306,15 @@
         white-space: nowrap;
       }
       .tm-card-overdue dd { color: #dc2626; font-weight: 600; }
+      /* Stammdaten: eigener, zurückhaltender Kasten am Kartenende -
+         ändern sich normalerweise nicht und sind deshalb nachrangig. */
+      .tm-card-details.tm-card-master {
+        margin-top: 8px;
+        padding: 6px 8px;
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+      }
+      .tm-card-master dd { color: #6b7280; }
       .tm-card-stand {
         margin-top: 8px;
         padding: 6px 8px;
