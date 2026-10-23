@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobile Kartenansicht Auftragsübersicht
 // @namespace    https://github.com/martsilg/tampermonkeyskripte
-// @version      1.3.1
+// @version      1.3.2
 // @description  PowerApps-artige Kartenansicht für die mobile Ticket-Übersicht (Betreff, Status, Priorität, Bearbeiter, Pool, Termine, Arbeitszeit, aktueller Stand) mit Pool-Leiste und Wischen zwischen den Pools
 // @author       martsilg
 // @match        https://pf-prod.vossko.de/WebApp/MPA/Tickets/Dispatch/*
@@ -133,23 +133,31 @@
     return grid.children.length ? grid : null;
   }
 
-  // Versatz der Karte nach Status, nur im Meldungspool: "30: Bearbeitung"
-  // nach rechts gerückt (wirkt wie bereits gezogen), "15: zur Bearbeitung
-  // freigegeben" nach links (wartet noch darauf, gezogen zu werden).
+  // Versatz der Karte nach Status, je Pool: { Pool: { Statusnummer: Richtung } }.
+  // 'right' = nach rechts gerückt (wirkt wie bereits gezogen bzw. in
+  // Klärung), 'left' = nach links (wartet noch darauf, gezogen zu werden).
+  //   Meldungspool:       30 Bearbeitung -> rechts, 15 zur Bearbeitung freigegeben -> links
+  //   Auftragsverteilung: 11 Klärungsbedarf -> rechts
+  const STATUS_SHIFTS = {
+    Work:     { 30: 'right', 15: 'left' },
+    Dispatch: { 11: 'right' }
+  };
+
   // Eigene Pfadprüfung statt POOLS/currentPoolIndex: buildCard läuft schon,
   // bevor die weiter unten deklarierten Pool-Konstanten initialisiert sind.
-  function isWorkPoolList() {
+  function listPoolKey() {
     const path = location.pathname;
-    return /\/WebApp\/MPA\/Tickets\/Work\//.test(path) && !/db_page_edit/.test(path);
+    if (/db_page_edit/.test(path)) return '';
+    const m = path.match(/\/WebApp\/MPA\/Tickets\/(Dispatch|Work|Released|Closed)\//);
+    return m ? m[1] : '';
   }
 
-  function statusShiftClass(statusText) {
+  function statusShiftClass(poolKey, statusText) {
+    const rules = STATUS_SHIFTS[poolKey];
     const m = statusText.match(/^\s*(\d+)/);
-    if (!m) return '';
-    const num = parseInt(m[1], 10);
-    if (num === 30) return 'tm-shift-right';
-    if (num === 15) return 'tm-shift-left';
-    return '';
+    if (!rules || !m) return '';
+    const dir = rules[parseInt(m[1], 10)];
+    return dir ? 'tm-shift-' + dir : '';
   }
 
   function buildCard(row) {
@@ -164,10 +172,8 @@
     const stand = standCell ? standCell.textContent.replace(/\s+/g, ' ').trim() : '';
 
     row.classList.add('tm-card', priorityClass(prio));
-    if (isWorkPoolList()) {
-      const shift = statusShiftClass(textOf(row, 'lookup_tsticket_tsticketlc_id'));
-      if (shift) row.classList.add(shift);
-    }
+    const shift = statusShiftClass(listPoolKey(), textOf(row, 'lookup_tsticket_tsticketlc_id'));
+    if (shift) row.classList.add(shift);
     row.setAttribute(DONE_ATTR, '1');
 
     const wrap = document.createElement('div');
@@ -254,7 +260,7 @@
          Style eines anderen Skripts die Regel überdecken. */
       tr.tm-card.tm-prio-critical { border-left-color: #dc2626; background: #fde8e8 !important; }
       tr.tm-card.tm-prio-critical > .tm-card-inner { background: #fde8e8; }
-      /* Status-Versatz im Meldungspool (siehe statusShiftClass): Grundabstand
+      /* Status-Versatz je Pool (siehe STATUS_SHIFTS): Grundabstand
          6px je Seite, verschoben wird über die Außenabstände - so ragt die
          Karte nie über den Bildschirmrand und es entsteht kein Seitwärts-
          Scrollen. !important, weil perfacts mobile Tabellen-CSS eigene
