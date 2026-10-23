@@ -1,8 +1,8 @@
 ﻿// ==UserScript==
 // @name         Mobile Ticket-Detailansicht
 // @namespace    https://github.com/martsilg/tampermonkeyskripte
-// @version      1.0.4
-// @description  Kompaktere Tab-Leiste (horizontal scrollbar, Swipe-Wechsel) und kompaktere Aktions-Buttons für die Ticket-Detailseite auf dem Smartphone
+// @version      1.1.0
+// @description  Kompaktere Tab-Leiste (horizontal scrollbar, Swipe-Wechsel), kompaktere Aktions-Buttons und Personal-Auswahl mit Favoriten für die Ticket-Detailseite auf dem Smartphone
 // @author       martsilg
 // @match        https://pf-prod.vossko.de/WebApp/MPA/Tickets/*/db_page_edit*
 // @grant        none
@@ -429,4 +429,361 @@
   if (footerEl) {
     fabObserver.observe(footerEl, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'disabled'] });
   }
+
+  // --- Personal-Auswahl als Kachel-Fenster statt nativer Android-Liste ---
+  // Antippen eines Benutzer-Selects im Personal-Reiter öffnet ein Fenster
+  // von unten: Favoriten (per Stern), zuletzt genutzte Personen, der Rest
+  // hinter "Weitere". Die Wahl wird in das ORIGINAL-Select geschrieben und
+  // dessen change-Event ausgelöst - die Inline-Handler von perfact
+  // (validate_options, check_all, tab_setchanged) laufen dadurch wie bei
+  // einer normalen Auswahl. Gespeichert werden nur Benutzer-IDs, die Namen
+  // kommen immer frisch aus den <option>s der Seite.
+  const STAFF_SELECT_SELECTOR = 'select[name="elements.tsticketxuser_tsuser_id:records"]';
+  const STAFF_FAV_KEY = 'tmStaffPickFavorites';
+  const STAFF_RECENT_KEY = 'tmStaffPickRecent';
+  const STAFF_RECENT_SHOWN = 6;   // so viele "Zuletzt genutzt" werden angezeigt
+  const STAFF_RECENT_STORED = 20; // mehr speichern, weil Favoriten beim Anzeigen herausgefiltert werden
+  const TAP_MAX_MOVE_PX = 10;
+
+  const staffSheetCss = `
+    #tm-staff-sheet-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 10000; /* über dem FAB-Stack (9999) */
+      background: rgba(0,0,0,0.45);
+      display: flex;
+      align-items: flex-end;
+    }
+    #tm-staff-sheet {
+      width: 100%;
+      max-height: 88vh;
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+      border-radius: 14px 14px 0 0;
+      box-shadow: 0 -4px 16px rgba(0,0,0,0.25);
+      padding-bottom: env(safe-area-inset-bottom);
+      font-size: 14px;
+    }
+    .tm-ss-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px 6px;
+    }
+    .tm-ss-title { flex: 1; font-weight: 700; font-size: 16px; }
+    .tm-ss-close {
+      width: 40px; height: 40px;
+      border: none; border-radius: 50%;
+      background: #f1f1f1; font-size: 18px;
+    }
+    .tm-ss-search {
+      margin: 0 12px 8px;
+      padding: 9px 12px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      font-size: 15px;
+    }
+    .tm-ss-body {
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      padding: 0 12px 12px;
+    }
+    .tm-ss-section-title {
+      margin: 10px 0 6px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      color: #777;
+    }
+    .tm-ss-hint { color: #999; font-style: italic; font-size: 13px; }
+    .tm-ss-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+    }
+    .tm-ss-chip {
+      display: flex;
+      align-items: stretch;
+      min-height: 44px;
+      border: 1px solid #d6d6d6;
+      border-radius: 8px;
+      background: #fafafa;
+      overflow: hidden;
+    }
+    .tm-ss-chip.tm-ss-selected {
+      border-color: #2563eb;
+      background: #e8efff;
+    }
+    .tm-ss-name {
+      flex: 1;
+      min-width: 0;
+      border: none;
+      background: transparent;
+      padding: 0 4px 0 10px;
+      text-align: left;
+      font-size: 14px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .tm-ss-chip.tm-ss-selected .tm-ss-name { font-weight: 700; color: #1d4ed8; }
+    .tm-ss-star {
+      flex: 0 0 38px;
+      border: none;
+      background: transparent;
+      font-size: 18px;
+      color: #b5b5b5;
+    }
+    .tm-ss-star.tm-ss-fav { color: #f59e0b; }
+    .tm-ss-more, .tm-ss-clear {
+      display: block;
+      width: 100%;
+      margin-top: 10px;
+      padding: 11px;
+      border: 1px dashed #bbb;
+      border-radius: 8px;
+      background: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      color: #444;
+    }
+    .tm-ss-clear { border-style: solid; color: #dc2626; border-color: #f3b4b4; }
+  `;
+  const staffSheetStyle = document.createElement('style');
+  staffSheetStyle.textContent = staffSheetCss;
+  document.head.appendChild(staffSheetStyle);
+
+  function loadIdList(key) {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(key) || '[]');
+      return Array.isArray(parsed) ? parsed.map(String) : [];
+    } catch (err) {
+      return [];
+    }
+  }
+
+  function saveIdList(key, list) {
+    try {
+      localStorage.setItem(key, JSON.stringify(list));
+    } catch (err) {
+      // localStorage nicht verfügbar - Favoriten/Verlauf gelten dann nur
+      // bis zum Schließen der Seite.
+    }
+  }
+
+  function staffOptions(select) {
+    return Array.from(select.options)
+      .filter(function (o) { return o.value !== ''; })
+      .map(function (o) { return { id: o.value, name: o.textContent.trim() }; })
+      .sort(function (a, b) { return a.name.localeCompare(b.name, 'de', { sensitivity: 'base' }); });
+  }
+
+  // Teilt die Personen in Favoriten / Zuletzt genutzt / Weitere. Reihenfolge
+  // der Favoriten alphabetisch, die der zuletzt Genutzten nach Aktualität.
+  function groupStaff(people, favIds, recentIds) {
+    const byId = {};
+    people.forEach(function (p) { byId[p.id] = p; });
+    const favSet = new Set(favIds);
+    const favorites = people.filter(function (p) { return favSet.has(p.id); });
+    const recent = recentIds
+      .filter(function (id) { return byId[id] && !favSet.has(id); })
+      .slice(0, STAFF_RECENT_SHOWN)
+      .map(function (id) { return byId[id]; });
+    const shown = new Set(favorites.concat(recent).map(function (p) { return p.id; }));
+    const others = people.filter(function (p) { return !shown.has(p.id); });
+    return { favorites: favorites, recent: recent, others: others };
+  }
+
+  function applyStaffChoice(select, id) {
+    select.value = id;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    if (id) {
+      const recent = loadIdList(STAFF_RECENT_KEY).filter(function (x) { return x !== id; });
+      recent.unshift(id);
+      saveIdList(STAFF_RECENT_KEY, recent.slice(0, STAFF_RECENT_STORED));
+    }
+  }
+
+  function toggleFavorite(id) {
+    const favs = loadIdList(STAFF_FAV_KEY);
+    const idx = favs.indexOf(id);
+    if (idx === -1) favs.push(id); else favs.splice(idx, 1);
+    saveIdList(STAFF_FAV_KEY, favs);
+  }
+
+  function closeStaffSheet() {
+    const backdrop = document.getElementById('tm-staff-sheet-backdrop');
+    if (backdrop) backdrop.remove();
+    document.documentElement.style.overflow = '';
+  }
+
+  function openStaffSheet(select) {
+    closeStaffSheet();
+    const people = staffOptions(select);
+    let showOthers = false;
+
+    const backdrop = document.createElement('div');
+    backdrop.id = 'tm-staff-sheet-backdrop';
+    backdrop.innerHTML =
+      '<div id="tm-staff-sheet" role="dialog" aria-label="Personal wählen">' +
+        '<div class="tm-ss-head">' +
+          '<span class="tm-ss-title">Personal wählen</span>' +
+          '<button type="button" class="tm-ss-close" aria-label="Schließen">✕</button>' +
+        '</div>' +
+        '<input type="search" class="tm-ss-search" placeholder="Name suchen …" autocomplete="off">' +
+        '<div class="tm-ss-body"></div>' +
+      '</div>';
+    const body = backdrop.querySelector('.tm-ss-body');
+    const search = backdrop.querySelector('.tm-ss-search');
+
+    function chipGrid(list) {
+      const grid = document.createElement('div');
+      grid.className = 'tm-ss-grid';
+      const favSet = new Set(loadIdList(STAFF_FAV_KEY));
+      list.forEach(function (p) {
+        const chip = document.createElement('div');
+        chip.className = 'tm-ss-chip' + (p.id === select.value ? ' tm-ss-selected' : '');
+        const name = document.createElement('button');
+        name.type = 'button';
+        name.className = 'tm-ss-name';
+        name.textContent = p.name; // textContent: Namen nie als HTML einsetzen
+        name.addEventListener('click', function () {
+          applyStaffChoice(select, p.id);
+          closeStaffSheet();
+        });
+        const star = document.createElement('button');
+        star.type = 'button';
+        star.className = 'tm-ss-star' + (favSet.has(p.id) ? ' tm-ss-fav' : '');
+        star.setAttribute('aria-label', favSet.has(p.id) ? 'Favorit entfernen' : 'Als Favorit markieren');
+        star.textContent = favSet.has(p.id) ? '★' : '☆';
+        star.addEventListener('click', function () {
+          toggleFavorite(p.id);
+          render();
+        });
+        chip.appendChild(name);
+        chip.appendChild(star);
+        grid.appendChild(chip);
+      });
+      return grid;
+    }
+
+    function section(title, list, emptyHint) {
+      const frag = document.createDocumentFragment();
+      const h = document.createElement('div');
+      h.className = 'tm-ss-section-title';
+      h.textContent = title;
+      frag.appendChild(h);
+      if (list.length) {
+        frag.appendChild(chipGrid(list));
+      } else if (emptyHint) {
+        const hint = document.createElement('div');
+        hint.className = 'tm-ss-hint';
+        hint.textContent = emptyHint;
+        frag.appendChild(hint);
+      }
+      return frag;
+    }
+
+    function render() {
+      const scrollTop = body.scrollTop;
+      body.innerHTML = '';
+      const term = search.value.trim().toLowerCase();
+
+      if (term) {
+        const hits = people.filter(function (p) { return p.name.toLowerCase().includes(term); });
+        body.appendChild(section('Treffer', hits, 'Kein Name gefunden.'));
+      } else {
+        const groups = groupStaff(people, loadIdList(STAFF_FAV_KEY), loadIdList(STAFF_RECENT_KEY));
+        const firstUse = !groups.favorites.length && !groups.recent.length;
+        body.appendChild(section('Favoriten', groups.favorites, 'Noch keine – ☆ neben einem Namen antippen.'));
+        if (groups.recent.length) {
+          body.appendChild(section('Zuletzt genutzt', groups.recent));
+        }
+        // Beim allerersten Öffnen gibt es weder Favoriten noch Verlauf -
+        // dann gleich alle zeigen statt eines leeren Fensters.
+        if (showOthers || firstUse) {
+          body.appendChild(section(firstUse ? 'Alle' : 'Weitere', groups.others));
+        }
+        if (!firstUse && groups.others.length) {
+          const more = document.createElement('button');
+          more.type = 'button';
+          more.className = 'tm-ss-more';
+          more.textContent = showOthers ? 'Weitere ausblenden ▲' : 'Weitere (' + groups.others.length + ') ▼';
+          more.addEventListener('click', function () {
+            showOthers = !showOthers;
+            render();
+          });
+          body.appendChild(more);
+        }
+      }
+
+      if (select.value) {
+        const clear = document.createElement('button');
+        clear.type = 'button';
+        clear.className = 'tm-ss-clear';
+        clear.textContent = 'Auswahl entfernen';
+        clear.addEventListener('click', function () {
+          applyStaffChoice(select, '');
+          closeStaffSheet();
+        });
+        body.appendChild(clear);
+      }
+      body.scrollTop = scrollTop;
+    }
+
+    search.addEventListener('input', render);
+    backdrop.querySelector('.tm-ss-close').addEventListener('click', closeStaffSheet);
+    backdrop.addEventListener('click', function (e) {
+      if (e.target === backdrop) closeStaffSheet();
+    });
+
+    render();
+    document.body.appendChild(backdrop);
+    document.documentElement.style.overflow = 'hidden'; // Seite dahinter nicht mitscrollen
+  }
+
+  // Natives Aufklappen des Selects verhindern und stattdessen das Fenster
+  // öffnen. Auf Touch-Geräten über touchend (preventDefault unterdrückt
+  // die nachfolgenden Maus-/Klick-Events und damit die Android-Liste),
+  // aber nur bei einem echten Antippen - wer auf dem Select zu scrollen
+  // beginnt, soll weiter scrollen können. mousedown deckt Maus/Stift ab.
+  let staffTapX = 0;
+  let staffTapY = 0;
+
+  function staffSelectFromEvent(e) {
+    if (!isNarrowViewport()) return null;
+    const select = e.target.closest && e.target.closest(STAFF_SELECT_SELECTOR);
+    return select && !select.disabled ? select : null;
+  }
+
+  document.addEventListener('touchstart', function (e) {
+    if (e.touches.length !== 1) return;
+    staffTapX = e.touches[0].clientX;
+    staffTapY = e.touches[0].clientY;
+  }, { passive: true, capture: true });
+
+  document.addEventListener('touchend', function (e) {
+    const select = staffSelectFromEvent(e);
+    if (!select) return;
+    const touch = e.changedTouches && e.changedTouches[0];
+    if (!touch) return;
+    if (Math.abs(touch.clientX - staffTapX) > TAP_MAX_MOVE_PX ||
+        Math.abs(touch.clientY - staffTapY) > TAP_MAX_MOVE_PX) return;
+    e.preventDefault();
+    select.blur();
+    openStaffSheet(select);
+  }, { passive: false, capture: true });
+
+  document.addEventListener('mousedown', function (e) {
+    const select = staffSelectFromEvent(e);
+    if (!select) return;
+    e.preventDefault();
+    openStaffSheet(select);
+  }, true);
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeStaffSheet();
+  });
 })();
